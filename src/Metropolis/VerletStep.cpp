@@ -37,18 +37,32 @@ Real VerletStep::calcMolecularEnergyContribution(int currMol, int startMol) {
 
 void VerletStep::CreateVerletList() {
     if( GPUCopy::onGpu() ) {
+        VerletStep::freeMemory();
         this->d_verletList.resize( this->VERLET_SIZE );
         thrust::fill( this->d_verletList.begin(), this->d_verletList.end(), -1 );    // -1 as invalid molID
         this->d_verletAtomCoords.resize( this->VACOORDS_SIZE );
+       
+        // Copy starting verlet atom coordinates
+        thrust::copy( this->d_verletAtomCoords.begin(),
+                      this->d_verletAtomCoords.end(),
+                      GPUCopy::simBoxGPU()->atomCoordinates );
 
+        // Create and copy new verlet list
         VerletCalcs::NewVerletList<int> newNeighbors( GPUCopy::simBoxGPU() );
         thrust::copy( this->d_verletList.begin(), this->d_verletList.end(), 
                 newNeighbors() );
     } else {    // on CPU
+        VerletStep::freeMemory();
         this->h_verletList.resize( this->VERLET_SIZE );
         thrust::fill( this->h_verletList.begin(), this->h_verletList.end(), -1 );    // -1 as invalid molID
         this->h_verletAtomCoords.resize( this->VACOORDS_SIZE );
 
+        // Copy starting verlet atom coordinates
+        thrust::copy( this->h_verletAtomCoords.begin(),
+                      this->h_verletAtomCoords.end(),
+                      GPUCopy::simBoxCPU()->atomCoordinates );
+
+        // Create and copy new verlet list
         VerletCalcs::NewVerletList<int> newNeighbors( GPUCopy::simBoxCPU() );
         thrust::copy( this->h_verletList.begin(), this->h_verletList.end(), 
                     newNeighbors() );
@@ -58,33 +72,13 @@ void VerletStep::CreateVerletList() {
 void VerletStep::checkOutsideSkinLayer(int molIdx) {
     VerletCalcs::UpdateVerletList<int> update;
 
-    if( GPUCopy::onGpu() ) {
-        //bool update;
-        //update(molIdx, &d_verletAtomCoords[0], GPUCopy::simBoxGPU());
-//        cudaMemcpyDeviceToHost(&update, &(GPUCopy::simBoxGPU()->udpate), sizeof(bool), cudaMemcpyDeviceToHost);
-        if( update(molIdx, thrust::raw_pointer_cast(&d_verletAtomCoords[0]), GPUCopy::simBoxGPU()) ) {
-            VerletStep::freeMemory();
+    if( GPUCopy::onGpu() )
+        if( update(molIdx, thrust::raw_pointer_cast(&d_verletAtomCoords[0]), GPUCopy::simBoxGPU()) )
+            VerletStep::CreateVerletList();
+    else    // on CPU
+        if( update(molIdx, &h_verletAtomCoords[0], GPUCopy::simBoxCPU()) )
             VerletStep::CreateVerletList();
 
-            cudaDeviceSynchronize();
-            thrust::copy( this->h_verletAtomCoords.begin(),
-                          this->h_verletAtomCoords.end(),
-                          GPUCopy::simBoxCPU()->atomCoordinates );
-            cudaDeviceSynchronize();
-        } // if update
-    } else {    // on CPU
-
-        if( update(molIdx, &h_verletAtomCoords[0], GPUCopy::simBoxCPU()) ) {
-            VerletStep::freeMemory();
-            VerletStep::CreateVerletList();
-
-            cudaDeviceSynchronize();
-            thrust::copy( this->h_verletAtomCoords.begin(),
-                          this->h_verletAtomCoords.end(),
-                          GPUCopy::simBoxCPU()->atomCoordinates );
-            cudaDeviceSynchronize();
-        } // if update
-    } // else
 } // checkOutsideSkinLayer
 
 void VerletStep::freeMemory() {
@@ -151,7 +145,7 @@ Real VerletCalcs::EnergyContribution<T>::operator()( const T neighbor ) const {
 
 template <typename T>
 bool VerletCalcs::UpdateVerletList<T>::operator()( const T i, const Real* vaCoords, SimBox* sb ) const {
-    const Real cutoff = pow(sb->cutoff, 2);
+    const Real cutoff = sb->cutoff * sb->cutoff;
     Real* atomCoords = sb->atomCoordinates;
     Real* bSize = sb->size;
     int numAtoms = sb->numAtoms;
