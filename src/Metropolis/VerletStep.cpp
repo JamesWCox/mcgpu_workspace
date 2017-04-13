@@ -59,7 +59,19 @@ void VerletStep::checkOutsideSkinLayer(int molIdx) {
     VerletCalcs::UpdateVerletList<int> update;
 
     if( GPUCopy::onGpu() ) {
+        //bool update;
+        //update(molIdx, &d_verletAtomCoords[0], GPUCopy::simBoxGPU());
+//        cudaMemcpyDeviceToHost(&update, &(GPUCopy::simBoxGPU()->udpate), sizeof(bool), cudaMemcpyDeviceToHost);
+        if( update(molIdx, thrust::raw_pointer_cast(&d_verletAtomCoords[0]), GPUCopy::simBoxGPU()) ) {
+            VerletStep::freeMemory();
+            VerletStep::CreateVerletList();
 
+            cudaDeviceSynchronize();
+            thrust::copy( this->h_verletAtomCoords.begin(),
+                          this->h_verletAtomCoords.end(),
+                          GPUCopy::simBoxCPU()->atomCoordinates );
+            cudaDeviceSynchronize();
+        } // if update
     } else {    // on CPU
 
         if( update(molIdx, &h_verletAtomCoords[0], GPUCopy::simBoxCPU()) ) {
