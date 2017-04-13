@@ -13,23 +13,32 @@ Real VerletStep::calcMolecularEnergyContribution(int currMol, int startMol) {
     int endIdx;
 
     if(GPUCopy::onGpu()) {
+        if( this->d_verletList.size() != 0 ) {
+            VerletCalcs::EnergyContribution<int> op1( currMol, GPUCopy::simBoxGPU() );
+            begIdx = currMol * this->NUM_MOLS;
+            endIdx = begIdx + this->NUM_MOLS;
 
-        VerletCalcs::EnergyContribution<int> op1( currMol, GPUCopy::simBoxGPU() );
-        begIdx = currMol * this->NUM_MOLS;
-        endIdx = begIdx + this->NUM_MOLS;
-
-        energy = thrust::transform_reduce( &this->d_verletList[begIdx],
-                                           &this->d_verletList[endIdx],
-                                           op1, init, op2);
+            energy = thrust::transform_reduce( &this->d_verletList[begIdx],
+                                               &this->d_verletList[endIdx],
+                                               op1, init, op2);
+        } // if verlet not empty
         cudaDeviceSynchronize();
     } else {    // on CPU
-        VerletCalcs::EnergyContribution<int> op1( currMol, GPUCopy::simBoxCPU() );
-        begIdx = currMol * this->NUM_MOLS;
-        endIdx = begIdx + this->NUM_MOLS;
+            if( this->h_verletList.size() != 0 ) {
+            VerletCalcs::EnergyContribution<int> op1( currMol, GPUCopy::simBoxCPU() );
+            begIdx = currMol * this->NUM_MOLS;
+            endIdx = begIdx + this->NUM_MOLS;
 
-        energy = thrust::transform_reduce( &this->h_verletList[begIdx],
-                                           &this->h_verletList[endIdx],
-                                           op1, init, op2);
+            energy = thrust::transform_reduce( &this->h_verletList[begIdx],
+                                               &this->h_verletList[endIdx],
+                                               op1, init, op2);
+        } // if verlet not empty
+        else {
+
+
+
+            return 0.0;
+        }
     }
     std::cout << "ENERGY: " << energy << std::endl;
     return energy;
@@ -41,7 +50,7 @@ void VerletStep::CreateVerletList() {
         this->d_verletList.resize( this->VERLET_SIZE );
         thrust::fill( this->d_verletList.begin(), this->d_verletList.end(), -1 );    // -1 as invalid molID
         this->d_verletAtomCoords.resize( this->VACOORDS_SIZE );
-       
+
         // Copy starting verlet atom coordinates
         thrust::copy( this->d_verletAtomCoords.begin(),
                       this->d_verletAtomCoords.end(),
