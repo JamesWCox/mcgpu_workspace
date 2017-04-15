@@ -10,6 +10,8 @@
 #define METROPOLIS_VERLETSTEP_H
 
 #include "SimulationStep.h"
+#include "GPUCopy.h"
+
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 
@@ -17,7 +19,7 @@ class VerletStep: public SimulationStep {
     private:
 
         // Used to avoid needing to copy numMolecules from the GPU and avoid unecessary data transfers 
-        int NUM_MOLS;   
+        int NUM_MOLS;
         int VERLET_SIZE;
         int VACOORDS_SIZE;
         thrust::host_vector<int> h_verletList;
@@ -40,7 +42,7 @@ class VerletStep: public SimulationStep {
             NUM_MOLS = box->numMolecules;
             VERLET_SIZE = pow(NUM_MOLS, 2);
             VACOORDS_SIZE = NUM_DIMENSIONS * NUM_MOLS;
-        }
+        } // constructor
 
         virtual ~VerletStep();
         virtual Real calcSystemEnergy(Real &subLJ, Real &subCharge, int numMolecules);

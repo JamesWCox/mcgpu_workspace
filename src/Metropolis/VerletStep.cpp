@@ -4,6 +4,8 @@
 #include "GPUCopy.h"
 
 #include <thrust/transform_reduce.h>
+#include <thrust/sequence.h>
+#include <thrust/execution_policy.h>
 
 Real VerletStep::calcMolecularEnergyContribution(int currMol, int startMol) {
     thrust::plus<Real> op2;
@@ -13,7 +15,8 @@ Real VerletStep::calcMolecularEnergyContribution(int currMol, int startMol) {
     int endIdx;
 
     if(GPUCopy::onGpu()) {
-        if( this->d_verletList.size() != 0 ) {
+        // Verlet list size check to handle initial system energy calculation
+        if( this->d_verletList.size() != this->NUM_MOLS ) {
             VerletCalcs::EnergyContribution<int> op1( currMol, GPUCopy::simBoxGPU() );
             begIdx = currMol * this->NUM_MOLS;
             endIdx = begIdx + this->NUM_MOLS;
@@ -21,26 +24,28 @@ Real VerletStep::calcMolecularEnergyContribution(int currMol, int startMol) {
             energy = thrust::transform_reduce( &this->d_verletList[begIdx],
                                                &this->d_verletList[endIdx],
                                                op1, init, op2);
-        } // if verlet not empty
+        } else {
+
+        } // else GPU calcSystemEnergy
         cudaDeviceSynchronize();
     } else {    // on CPU
-            if( this->h_verletList.size() != 0 ) {
             VerletCalcs::EnergyContribution<int> op1( currMol, GPUCopy::simBoxCPU() );
+        // Verlet list size check to handle initial system energy calculation
+        if( this->h_verletList.size() != this->NUM_MOLS ) {
             begIdx = currMol * this->NUM_MOLS;
             endIdx = begIdx + this->NUM_MOLS;
 
             energy = thrust::transform_reduce( &this->h_verletList[begIdx],
                                                &this->h_verletList[endIdx],
                                                op1, init, op2);
-        } // if verlet not empty
-        else {
-
-
-
-            return 0.0;
-        }
-    }
-    std::cout << "ENERGY: " << energy << std::endl;
+        } else {
+            energy = thrust::transform_reduce( this->h_verletList.begin(),
+                                               this->h_verletList.end(),
+                                               op1, init, op2);
+            energy /= 2;
+        } // else CPU calcSystemEnergy
+    } // else CPU
+//    std::cout << "ENERGY: " << energy << std::endl;
     return energy;
 } // calcMolecularEnergyContribution
 
@@ -103,6 +108,16 @@ void VerletStep::freeMemory() {
 }
 
 Real VerletStep::calcSystemEnergy( Real &subLJ, Real &subCharge, int numMolecules ) {
+
+    // Set verlet list for initial system energy calculation
+    if( GPUCopy::onGpu() ) {
+        this->d_verletList.resize( this->NUM_MOLS );
+        thrust::sequence( thrust::device, this->d_verletList.begin(), this->d_verletList.end() );
+    } else {
+        this->h_verletList.resize( this->NUM_MOLS );
+        thrust::sequence( thrust::host, this->h_verletList.begin(), this->h_verletList.end() );
+    }
+
     Real result = SimulationStep::calcSystemEnergy( subLJ, subCharge, numMolecules );
     VerletStep::CreateVerletList();
     return result;
